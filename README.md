@@ -172,6 +172,26 @@ node server.js    # http://localhost:3000, data in ./data
 
 How it works: the browser converts the audio to 16 kHz mono WAV (Gemini's documented formats include WAV, MP3, AAC, OGG and FLAC, but not WebM, which browsers record) and sends it with a fresh signature from the author. The server checks the signature, asks Gemini for a JSON answer, stores it, and shows it on the story page labelled as machine-made and outside the signature. Private stories cannot use it. `GEMINI_MODEL` changes the model (default `gemini-2.5-flash`, the one in Google's audio examples) and `AI_DAILY_MAX` caps daily use.
 
+## Keep stories safe with Neon (free Postgres)
+
+Hosts with an ephemeral filesystem, such as Render's free web service, erase local files when the service restarts, redeploys or sleeps after 15 minutes without traffic (Render docs, "Deploy for Free"). Gewel can mirror everything to a Neon Postgres database over HTTP, with no extra packages.
+
+1. In Neon, create a project and copy its **connection string** (it starts with `postgresql://`).
+2. Put it in `.env` as `DATABASE_URL=...` locally, or in your host's environment variables when deployed. It contains a password, so never commit it or paste it in public.
+3. Start the server. It creates one table, `gewel_files`, restores every story from it, and then serves. Each save, tip setting, AI result, timestamp record and deletion is written to the database before the server answers. If a database write fails, the upload is refused with an error, and a deletion removes the database copy so it cannot come back.
+
+Tested against a mock of Neon's SQL-over-HTTP endpoint, including a fresh server with an empty disk restoring a story and a failed write being reported. **Not tested against a real Neon database.** Audio is stored as base64 inside one request per file, so very large uploads depend on Neon's request size limit; the 8 MB per story limit is meant to stay under it. Check Neon's current free plan limits (storage, compute hours) before relying on it.
+
+## Deploy on Render
+
+1. Push this repo to GitHub, then in Render choose **New**, **Web Service**, and connect the repo.
+2. Runtime **Node**. Build command: `echo ok`. Start command: `node server.js`. Plan **Free**.
+3. Environment variables: `DATABASE_URL` (your Neon string), `NODE_VERSION=22` (relay publishing needs Node 22 or newer), `TRUST_PROXY=1` (so rate limits count each visitor, not Render's proxy), `STORE_CAP_MB=100`, and optionally `GEMINI_API_KEY`. Set secrets in Render's dashboard only.
+4. Without `DATABASE_URL`, also set `DEMO_NOTICE=Demo server: stories are erased when it restarts or sleeps.` to show a banner.
+5. The first visit after a sleep takes about a minute.
+
+`STORE_CAP_MB` (default 300) refuses uploads once total audio reaches that size; it has no automated test.
+
 ## 7. Project layout
 
 ```
@@ -194,6 +214,7 @@ gewel/
 - Server: story checks (valid, duplicate, edited, altered audio, wrong kind, incomplete private story), history by public key, public verification page, private pages with no player, the public wall (opt-in only), signed deletion, Lightning address handling, tip invoices against a mock wallet.
 - AI help against a mock Gemini server: the request shape, key in a header, author-only signature, private stories refused, result labelled on the public page.
 - Relays the storyteller chooses (refused when not `wss://` or more than five; only the chosen relay used) and timestamp requests against a mock calendar: the note id goes out as a 32-byte digest, the `.txt` file hashes to the note id, the `.ots` file carries the header and digest, and the page says pending.
+- Durable storage against a mock Neon SQL-over-HTTP endpoint: a story is mirrored to the database, a failed write is reported and not kept, a fresh server with an empty disk restores it (audio identical, signature still valid), and a deletion removes the database copy.
 - Relay publishing and wallet connection **against a mock relay that speaks the real Nostr relay protocol over WebSocket**, including a relay that cannot be reached.
 
 **Never run against the real thing (test these on your machine):**

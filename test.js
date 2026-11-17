@@ -90,6 +90,30 @@ const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x"
     assert.equal((await del(N.genKey())).status,403,"another key cannot delete");
     assert.equal((await del(sk)).status,200,"author can delete");
     assert.equal((await fetch(B+"/s/"+ev.id)).status,404,"story gone");
+    /* durable storage in Neon (against a mock of its HTTP SQL endpoint) */
+    const DBU="postgres://user:secretpw@localhost:3916/db",files=new Map();let failInsert=false;
+    const neon=http.createServer(async(q,r)=>{let b="";for await(const d of q)b+=d;r.setHeader("content-type","application/json");
+      if(q.url!=="/sql"||q.headers["neon-connection-string"]!==DBU){r.statusCode=401;return r.end(JSON.stringify({message:"unauthorized"}))}
+      const j=JSON.parse(b);let rows=[];if(/^INSERT/i.test(j.query)){if(failInsert){r.statusCode=500;return r.end(JSON.stringify({message:"boom"}))}files.set(j.params[0],j.params[1])}
+      else if(/^DELETE/i.test(j.query))files.delete(j.params[0]);else if(/^SELECT name FROM/i.test(j.query))rows=[...files.keys()].map(name=>({name}));else if(/^SELECT encode/i.test(j.query))rows=[{data:files.get(j.params[0])}];
+      r.end(JSON.stringify({command:"X",rowCount:rows.length,rows,fields:[]}))}).listen(3916);
+    const dir=n=>require("os").tmpdir()+"/gewel-db-"+n+"-"+Date.now(),dA=dir("a"),dB=dir("b");
+    const boot=(port,d)=>spawn("node",["server.js"],{cwd:__dirname,env:{...process.env,PORT:port,DATA_DIR:d,DATABASE_URL:DBU,NEON_HTTP_BASE:"http://localhost:3916",RELAYS:"",OTS_CALENDARS:"http://localhost:3915"}});
+    const up=async p=>{for(let i=0;i<40;i++){try{await fetch("http://localhost:"+p+"/api/wall");return}catch(e){await new Promise(r=>setTimeout(r,200))}}throw new Error("database-backed server did not start")};
+    const sA=boot(3920,dA);try{await up(3920);
+      const dev=await N.event(sk,1,[["title","DB one"],["topic","t"],["lang","Wolof"],["author","Test"],["x",sha(audio)],["t","gewel"]],"DB one");
+      const pA=(e)=>fetch("http://localhost:3920/api/stories",{method:"POST",headers:{"content-type":"audio/webm","x-event":b64(JSON.stringify(e))},body:audio});
+      assert.equal((await pA(dev)).status,201,"story saved with the database on");assert(files.has(dev.id+".json")&&files.has(dev.id+".bin"),"story files mirrored to the database");assert(Buffer.from(files.get(dev.id+".bin"),"base64").equals(audio),"database holds the exact audio");
+      failInsert=true;const dev2=await N.event(sk,1,[["title","DB two"],["topic","t"],["lang","Wolof"],["author","Test"],["x",sha(audio)],["t","gewel"]],"DB two");
+      assert.equal((await pA(dev2)).status,502,"a failed database write is reported, not hidden");failInsert=false;
+      assert.equal((await (await fetch("http://localhost:3920/api/stories?pk="+pk)).json()).stories.length,1,"the failed story was not kept");
+      const sB=boot(3921,dB);try{await up(3921);
+        assert.equal((await (await fetch("http://localhost:3921/api/stories?pk="+pk)).json()).stories.length,1,"a fresh server with an empty disk restores the story");
+        assert(Buffer.from(await (await fetch("http://localhost:3921/api/audio/"+dev.id)).arrayBuffer()).equals(audio),"restored audio is identical");
+        assert((await (await fetch("http://localhost:3921/s/"+dev.id)).text()).includes("signature is valid"),"restored story still verifies");
+        const del=await N.event(sk,5,[["e",dev.id]],"");assert.equal((await fetch("http://localhost:3921/api/delete",{method:"POST",body:JSON.stringify(del)})).status,200,"delete works on the restored server");
+        assert(!files.has(dev.id+".json")&&!files.has(dev.id+".bin"),"delete removes the database copy too, so it cannot come back")}finally{sB.kill()}
+    }finally{sA.kill();neon.close();for(const d of[dA,dB])require("fs").rmSync(d,{recursive:true,force:true})}
     console.log("ALL TESTS PASSED");
   }catch(e){console.error("FAILED:",e.message);process.exitCode=1}finally{s.kill();mock.close();relay.close();gem.close();cal.close();setTimeout(()=>process.exit(process.exitCode||0),200);require("fs").rmSync(TMP,{recursive:true,force:true})}
 })();

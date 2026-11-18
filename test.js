@@ -17,8 +17,10 @@ function miniRelay(port,wsk){const store=[],subs=[],M=(f,e)=>(!f.kinds||f.kinds.
       if(a[0]==="EVENT"){s.out(["OK",a[1].id,true,""]);put(a[1]);wallet(a[1])}}});sock.on("error",()=>{})}).listen(port);return srv}
 const relay=miniRelay(3913,WSK);let seen={};const otsSeen=[];
 const cal=http.createServer(async(q,r)=>{const ch=[];for await(const d of q)ch.push(d);otsSeen.push({url:q.url,body:Buffer.concat(ch),accept:q.headers.accept});r.end(crypto.randomBytes(40))}).listen(3915);
+let gemMode="interactions";const GJ=JSON.stringify({language:"Wolof",transcript:"Bés bu rafet la",english:"It was a beautiful day",french:"C’était une belle journée"});
 const gem=http.createServer(async(q,r)=>{let b="";for await(const d of q)b+=d;seen={url:q.url,key:q.headers["x-goog-api-key"],body:JSON.parse(b)};r.setHeader("content-type","application/json");
-  r.end(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify({language:"Wolof",transcript:"Bés bu rafet la",english:"It was a beautiful day",french:"C’était une belle journée"})}]}}]}))}).listen(3914);
+  if(q.url==="/v1beta/interactions"){if(gemMode==="fallback"){r.statusCode=404;return r.end(JSON.stringify({error:{message:"model not found"}}))}return r.end(JSON.stringify({outputs:[{type:"text",text:GJ}]}))}
+  r.end(JSON.stringify({candidates:[{content:{parts:[{text:GJ}]}}]}))}).listen(3914);
 const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x");r.setHeader("content-type","application/json");
   if(u.pathname==="/.well-known/lnurlp/tester")return r.end(JSON.stringify({tag:"payRequest",callback:"http://localhost:3912/cb",minSendable:1000,maxSendable:5000000,metadata:"[]"}));
   if(u.pathname==="/cb"){const sats=+u.searchParams.get("amount")/1000;return r.end(JSON.stringify({pr:"lnbc"+(sats===777?1:sats/100)+"u1pqzqzqzqzqz"}))}
@@ -71,7 +73,14 @@ const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x"
     assert.equal((await post({...pe,tags:pe.tags.filter(x=>x[0]!=="iv")},Buffer.from(sl.ct),"application/octet-stream")).status,400,"incomplete private story refused");
     const wav=crypto.randomBytes(3000),aiReq=async(k,id,body=wav,tx)=>fetch(B+"/api/ai/"+id,{method:"POST",headers:{"content-type":"audio/wav","x-event":b64(JSON.stringify(await N.event(k,27235,[["e",id],["x",tx||sha(body)]],"gewel-ai")))},body});
     const ar=await aiReq(sk,wev.id);assert.equal(ar.status,200,"AI transcript made");const aj=await ar.json();assert(aj.transcript&&aj.french&&aj.english,"AI result has transcript and translations");
-    assert(seen.url.includes("gemini-2.5-flash:generateContent")&&seen.key==="testkey"&&seen.body.contents[0].parts[1].inline_data.mime_type==="audio/wav","request reaches Gemini with the key in a header and audio inline");
+    assert(seen.url==="/v1beta/interactions"&&seen.key==="testkey"&&seen.body.model==="gemini-3.8-flash"&&seen.body.input[1].type==="audio"&&seen.body.input[1].mime_type==="audio/wav"&&seen.body.response_format.type==="object","request uses the Interactions API with the key in a header and audio inline");
+    gemMode="fallback";const fb=await aiReq(sk,cv.id);assert.equal(fb.status,200,"falls back to generateContent when the Interactions endpoint is not found");assert(seen.url.includes(":generateContent"),"fallback used the generateContent endpoint");gemMode="interactions";
+    /* audio served with Range support (iPhone) and content-type parameters stripped */
+    const full=await fetch(B+"/api/audio/"+wev.id);assert.equal(full.headers.get("accept-ranges"),"bytes","audio advertises byte ranges");
+    const r1=await fetch(B+"/api/audio/"+wev.id,{headers:{range:"bytes=0-9"}});assert.equal(r1.status,206,"range request gets 206");assert.equal(r1.headers.get("content-range"),"bytes 0-9/"+audio.length,"content-range is correct");assert(Buffer.from(await r1.arrayBuffer()).equals(audio.subarray(0,10)),"range bytes are correct");
+    const r2=await fetch(B+"/api/audio/"+wev.id,{headers:{range:"bytes=-5"}});assert.equal(r2.status,206,"suffix range works");assert(Buffer.from(await r2.arrayBuffer()).equals(audio.subarray(audio.length-5)),"suffix bytes are correct");
+    assert.equal((await fetch(B+"/api/audio/"+wev.id,{headers:{range:"bytes=999999-"}})).status,416,"out-of-range request gets 416");
+    const mv=await mk([["m","1"]]);assert.equal((await post(mv,audio,"audio/mp4;codecs=mp4a.40.2")).status,201,"iPhone-style content type accepted");assert.equal((await fetch(B+"/api/audio/"+mv.id)).headers.get("content-type"),"audio/mp4","codec parameters are stripped so the browser can play it");
     assert((await (await fetch(B+"/s/"+wev.id)).text()).includes("Made by a machine"),"AI text is labelled on the public page");
     assert.equal((await aiReq(N.genKey(),wev.id)).status,403,"only the author can request AI help");
     assert.equal((await aiReq(sk,wev.id,wav,"0".repeat(64))).status,403,"signature must match the audio sent");

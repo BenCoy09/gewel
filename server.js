@@ -40,7 +40,7 @@ function priv(ip){if(net.isIPv4(ip)){const[a,b]=ip.split(".").map(Number);return
 async function lget(u){const x=new URL(u);if(!LOCAL){if(x.protocol!=="https:")throw new Error("Wallet host must use https.");const{address}=await dns.lookup(x.hostname);if(priv(address))throw new Error("Wallet host is not allowed.")}
   const r=await fetch(u,{redirect:"error",signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("Wallet host returned an error.");const t=await r.text();if(t.length>20000)throw new Error("Wallet reply is too large.");return JSON.parse(t)}
 /* AI transcript and translation through the Gemini API. The key lives only in the server environment. */
-const KEY=process.env.GEMINI_API_KEY||"",MODEL=process.env.GEMINI_MODEL||"gemini-2.5-flash",GBASE=process.env.GEMINI_BASE||"https://generativelanguage.googleapis.com",AIMAX=+(process.env.AI_DAILY_MAX||100);let aiDay="",aiN=0;
+const KEY=process.env.GEMINI_API_KEY||"",MODEL=process.env.GEMINI_MODEL||"gemini-3.8-flash",GBASE=process.env.GEMINI_BASE||"https://generativelanguage.googleapis.com",AIMAX=+(process.env.AI_DAILY_MAX||100);let aiDay="",aiN=0;
 const aiFile=id=>path.join(DATA,"ai-"+id+".json"),aiOf=id=>{try{return JSON.parse(fs.readFileSync(aiFile(id)))}catch(e){return null}};
 const PROMPT='Transcribe this audio exactly as spoken, in the language spoken. Then translate it into English and into French. If you are unsure of a word, write [unclear]. Reply only with JSON: {"language":"...","transcript":"...","english":"...","french":"..."}';
 /* relays chosen by the storyteller, checked before the server connects to them */
@@ -56,6 +56,14 @@ async function stamp(ev){const digest=Buffer.from(ev.id,"hex"),errs=[];for(const
     if(!r.ok)throw new Error("status "+r.status);const b=Buffer.from(await r.arrayBuffer());if(!b.length||b.length>10000)throw new Error("unexpected reply");
     await put(otsFile(ev.id),JSON.stringify({status:"pending",calendar:cal,at:new Date().toISOString(),proof:b.toString("base64")}));return}catch(e){errs.push(new URL(cal).host+": "+e.message)}}
   await put(otsFile(ev.id),JSON.stringify({status:"failed",at:new Date().toISOString(),error:errs.join("; ")}))}
+const interactionText=j=>{if(typeof j.output_text==="string")return j.output_text;const t=[];(function w(x){if(!x||typeof x!=="object")return;if(typeof x.text==="string"&&(!x.type||x.type==="text"))t.push(x.text);for(const v of Object.values(x))w(v)})(j.outputs||j.output||j.steps||[]);return t.join("")};
+const SCHEMA={type:"object",properties:{language:{type:"string"},transcript:{type:"string"},english:{type:"string"},french:{type:"string"}},required:["language","transcript","english","french"]};
+/* audio with HTTP Range support: iPhones refuse to play audio from a server that ignores Range requests */
+function serveAudio(req,res,buf,type){const h={"content-type":type,"accept-ranges":"bytes","x-content-type-options":"nosniff","cache-control":"private, max-age=3600"},g=String(req.headers.range||"").match(/^bytes=(\d*)-(\d*)$/);
+  if(g&&(g[1]||g[2])){const n=buf.length,a=g[1]===""?Math.max(0,n-Number(g[2])):Number(g[1]),b=g[1]===""||g[2]===""?n-1:Math.min(Number(g[2]),n-1);
+    if(a>b||a>=n){res.writeHead(416,{"content-range":"bytes */"+n});return res.end()}
+    res.writeHead(206,{...h,"content-range":`bytes ${a}-${b}/${n}`,"content-length":b-a+1});return res.end(buf.subarray(a,b+1))}
+  res.writeHead(200,{...h,"content-length":buf.length});res.end(buf)}
 const hits=new Map();const limited=ip=>{const n=Date.now(),a=(hits.get(ip)||[]).filter(t=>n-t<36e5);a.push(n);hits.set(ip,a);return a.length>40};
 const send=(res,c,body,type="application/json")=>{res.writeHead(c,{"content-type":type,"x-content-type-options":"nosniff","referrer-policy":"no-referrer",
   "content-security-policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src 'self' blob:"});res.end(body)};
@@ -82,7 +90,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==="GET"&&(p==="/"||p==="/index.html")){let h=fs.readFileSync(path.join(__dirname,"public/index.html"),"utf8");if(process.env.DEMO_NOTICE)h=h.replace('<main id="app">',`<p class="notice">${esc(process.env.DEMO_NOTICE)}</p><main id="app">`);return send(res,200,h,"text/html; charset=utf-8")}
     if(req.method==="GET"&&p==="/nostr.js")return send(res,200,fs.readFileSync(path.join(__dirname,"nostr.js")),"text/javascript; charset=utf-8");
     if(req.method==="GET"&&(m=p.match(/^\/s\/([0-9a-f]{64})$/))){const r=idx.get(m[1]);return r?send(res,200,await page(r),"text/html; charset=utf-8"):send(res,404,"Story not found","text/plain")}
-    if(req.method==="GET"&&(m=p.match(/^\/api\/audio\/([0-9a-f]{64})$/))){const r=idx.get(m[1]);return r?send(res,200,fs.readFileSync(path.join(DATA,m[1]+".bin")),r.mime):json(res,404,{error:"Not found."})}
+    if(req.method==="GET"&&(m=p.match(/^\/api\/audio\/([0-9a-f]{64})$/))){const r=idx.get(m[1]);return r?serveAudio(req,res,fs.readFileSync(path.join(DATA,m[1]+".bin")),r.mime):json(res,404,{error:"Not found."})}
     if(req.method==="GET"&&(m=p.match(/^\/api\/relays\/([0-9a-f]{64})$/)))return json(res,200,relayStat.get(m[1])||{});
     if(req.method==="GET"&&(m=p.match(/^\/api\/ots\/([0-9a-f]{64})$/))){const o=otsOf(m[1]);return json(res,200,o?{status:o.status,calendar:o.calendar,at:o.at,error:o.error}:{})}
     if(req.method==="GET"&&(m=p.match(/^\/ots\/([0-9a-f]{64})\.txt(\.ots)?$/))){const r=idx.get(m[1]),o=otsOf(m[1]);if(!r)return send(res,404,"Not found","text/plain");res.setHeader("content-disposition",`attachment; filename="${m[1]}.txt${m[2]||""}"`);
@@ -94,7 +102,7 @@ const server=http.createServer(async(req,res)=>{
       const buf=await body(req,MAX);let ev;try{ev=JSON.parse(Buffer.from(req.headers["x-event"]||"","base64").toString())}catch(e){return json(res,400,{error:"Event header is not valid."})}
       const bad=await validate(ev,buf);if(bad)return json(res,400,{error:bad});if(idx.has(ev.id))return json(res,409,{error:"This story is already saved."});
       let rl;try{rl=await cleanRelays(req.headers["x-relays"])}catch(e){return json(res,400,{error:e.message})}
-      const ct=req.headers["content-type"]||"",mime=(/^audio\/[a-z0-9.+-]{1,30}$/i.test(ct)||(tag(ev,"enc")&&ct==="application/octet-stream"))?ct:"audio/webm",rec={event:ev,mime,size:buf.length,received:new Date().toISOString()};if([...idx.values()].reduce((t,r)=>t+(r.size||0),0)+buf.length>CAP)return json(res,507,{error:"This server has reached its storage limit. Try again later."});
+      const ct=String(req.headers["content-type"]||"").split(";")[0].trim().toLowerCase(),mime=(/^audio\/[a-z0-9.+-]{1,30}$/i.test(ct)||(tag(ev,"enc")&&ct==="application/octet-stream"))?ct:"audio/webm",rec={event:ev,mime,size:buf.length,received:new Date().toISOString()};if([...idx.values()].reduce((t,r)=>t+(r.size||0),0)+buf.length>CAP)return json(res,507,{error:"This server has reached its storage limit. Try again later."});
       try{await put(path.join(DATA,ev.id+".bin"),buf);await put(path.join(DATA,ev.id+".json"),JSON.stringify(rec))}catch(e){for(const x of[".bin",".json"])await drop(path.join(DATA,ev.id+x)).catch(()=>{});return json(res,502,{error:"Could not save to the database. Try again."})}
       idx.set(ev.id,rec);publish(ev,rl);stamp(ev).catch(()=>{});
       return json(res,201,{id:ev.id,url:"/s/"+ev.id})}
@@ -110,9 +118,12 @@ const server=http.createServer(async(req,res)=>{
       const buf=await body(req,12*1024*1024);let ev;try{ev=JSON.parse(Buffer.from(req.headers["x-event"]||"","base64").toString())}catch(e){return json(res,400,{error:"Bad request."})}
       if(!await NS.check(ev)||ev.kind!==27235||!fresh(ev)||tag(ev,"e")!==m[1]||tag(ev,"x")!==sha(buf)||ev.pubkey!==r.event.pubkey)return json(res,403,{error:"Only the storyteller can ask for this, with a fresh signature."});
       const day=new Date().toISOString().slice(0,10);if(aiDay!==day){aiDay=day;aiN=0}if(aiN>=AIMAX)return json(res,429,{error:"The daily AI limit has been reached. Try tomorrow."});aiN++;
-      try{const g=await fetch(`${GBASE}/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`,{method:"POST",headers:{"content-type":"application/json","x-goog-api-key":KEY},signal:AbortSignal.timeout(90000),
-          body:JSON.stringify({contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:"audio/wav",data:buf.toString("base64")}}]}],generationConfig:{responseMimeType:"application/json"}})});
-        if(!g.ok)throw new Error("Gemini returned status "+g.status);const j=await g.json(),o=JSON.parse((j.candidates?.[0]?.content?.parts||[]).map(x=>x.text||"").join("")),c=v=>typeof v==="string"?v.slice(0,20000):"";
+      try{const b64=buf.toString("base64"),HD={"content-type":"application/json","x-goog-api-key":KEY},call=(u,b)=>fetch(GBASE+u,{method:"POST",headers:HD,signal:AbortSignal.timeout(90000),body:JSON.stringify(b)});
+        let g=await call("/v1beta/interactions",{model:MODEL,input:[{type:"text",text:PROMPT},{type:"audio",data:b64,mime_type:"audio/wav"}],response_format:SCHEMA}),mode="interactions";
+        if(!g.ok&&[400,404,405].includes(g.status)){const g2=await call(`/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`,{contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:"audio/wav",data:b64}}]}],generationConfig:{responseMimeType:"application/json"}});if(g2.ok){g=g2;mode="generateContent"}}
+        if(!g.ok){const ej=await g.json().catch(()=>({}));throw new Error("Gemini returned status "+g.status+(ej.error&&ej.error.message?": "+String(ej.error.message).slice(0,200):""))}
+        const j=await g.json(),txt=mode==="interactions"?interactionText(j):(j.candidates?.[0]?.content?.parts||[]).map(x=>x.text||"").join("");if(!txt)throw new Error("Gemini sent a reply in an unexpected shape (keys: "+Object.keys(j).slice(0,8).join(", ")+")");
+        const o=JSON.parse(txt),c=v=>typeof v==="string"?v.slice(0,20000):"";
         const out={language:c(o.language).slice(0,60),transcript:c(o.transcript),english:c(o.english),french:c(o.french),model:MODEL,created:new Date().toISOString()};
         if(!out.transcript)throw new Error("Gemini returned no transcript.");await put(aiFile(m[1]),JSON.stringify(out));return json(res,200,out)}
       catch(e){return json(res,502,{error:e.message.startsWith("Gemini")?e.message:"Could not read Gemini’s answer."})}}

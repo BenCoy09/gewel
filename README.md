@@ -170,7 +170,9 @@ node server.js    # http://localhost:3000, data in ./data
 2. In the project folder: `cp .env.example .env`, put the key in `.env`, restart the server. `.env` is git-ignored. Never paste the key into code, the browser or a chat.
 3. On your Stories page, a public story gets an **Add AI transcript and translation** button. It asks for confirmation, because the audio goes to Google through this server.
 
-How it works: the browser converts the audio to 16 kHz mono WAV (Gemini's documented formats include WAV, MP3, AAC, OGG and FLAC, but not WebM, which browsers record) and sends it with a fresh signature from the author. The server checks the signature, asks Gemini for a JSON answer, stores it, and shows it on the story page labelled as machine-made and outside the signature. Private stories cannot use it. `GEMINI_MODEL` changes the model (default `gemini-2.5-flash`, the one in Google's audio examples) and `AI_DAILY_MAX` caps daily use.
+How it works: the browser converts the audio to 16 kHz mono WAV and sends it with a fresh signature from the author. The server checks the signature, then asks Gemini for a JSON answer through the Interactions API, which Google's audio docs now use, and falls back to `generateContent` if that endpoint answers 400, 404 or 405. The result is stored and shown on the story page, labelled as machine-made and outside the signature. Private stories cannot use it. `AI_DAILY_MAX` caps daily use.
+
+The default model is `gemini-3.8-flash`, the one in Google's audio docs as of their September 2026 update. Model names change often, so if you see "Gemini returned status 404", set `GEMINI_MODEL` to a current model name from Google AI Studio. Tested only against a mock Gemini server; I have not run it against Google's real API.
 
 ## Keep stories safe with Neon (free Postgres)
 

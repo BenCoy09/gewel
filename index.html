@@ -122,12 +122,12 @@ stories:()=>`<div class="wrap"><h1>Your stories</h1>
 <form id="f-story" novalidate><label for="t">Title</label><input id="t" maxlength="90" placeholder="What did that day look like at your stall?">
 <label for="ev">What is it about?</label><select id="ev">${EVENTS.map(e=>`<option value="${e}">${e}</option>`).join("")}</select>
 <label>Audio</label><div class="rec"><button class="btn alt" type="button" id="rb">Start recording</button><span class="dot"></span><span id="rs" class="meta">No recording yet</span></div>
-<label for="up">Or upload an audio file</label><input id="up" type="file" accept="audio/*"><audio id="pv" controls hidden></audio>
+<label for="up">Or upload an audio file</label><input id="up" type="file"><audio id="pv" controls hidden></audio>
 <label><input type="checkbox" id="priv" style="width:auto"> Keep this story private (the audio is encrypted with a key only you hold)</label><label><input type="checkbox" id="pubwall" style="width:auto"> Show it on the public wall</label>
 <div id="e" class="err" role="alert"></div><div class="row"><button class="btn" type="submit">Sign and save</button></div></form>
 <h2>Saved on this server</h2><div id="list"><p class="meta">Loading…</p></div></div>`,
 verify:()=>`<div class="wrap"><h1>Verify a proof</h1><p class="lead">Paste a proof. Add the audio file too to check it has not been changed.</p>
-<form id="f-ver" novalidate><label for="pj">Proof</label><textarea id="pj" spellcheck="false"></textarea><label for="pa">Audio file (optional)</label><input id="pa" type="file" accept="audio/*">
+<form id="f-ver" novalidate><label for="pj">Proof</label><textarea id="pj" spellcheck="false"></textarea><label for="pa">Audio file (optional)</label><input id="pa" type="file">
 <div class="row"><button class="btn" type="submit">Check proof</button></div><div id="vr" aria-live="polite"></div></form></div>`,
 account:()=>{const p=prefs();return `<div class="wrap"><h1>Account</h1>
 <p class="meta">Your Nostr public key <code id="npub"></code></p>
@@ -184,8 +184,8 @@ stories(){
     mr.onstop=()=>{s.getTracks().forEach(t=>t.stop());$(".rec").classList.remove("live");$("#rb").textContent="Record again";show(new Blob(ch,{type:mr.mimeType||"audio/webm"}))};
     mr.start();$(".rec").classList.add("live");$("#rb").textContent="Stop recording";rs.textContent="Recording…"}
     catch(e){$("#e").textContent="Microphone is blocked or missing. Allow access in your browser, or upload an audio file instead."}};
-  $("#up").onchange=e=>{const f=e.target.files[0];if(!f)return;const M={m4a:"audio/mp4",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",aac:"audio/aac",webm:"audio/webm",flac:"audio/flac",opus:"audio/ogg"},x=(f.name.split(".").pop()||"").toLowerCase();
-    show(f.type&&f.type.startsWith("audio/")?f:new Blob([f],{type:M[x]||"audio/mp4"}))};
+  $("#up").onchange=e=>{const f=e.target.files[0];if(!f)return;const M={m4a:"audio/mp4",mp4:"audio/mp4",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",aac:"audio/aac",webm:"audio/webm",flac:"audio/flac",opus:"audio/ogg"},x=(f.name.split(".").pop()||"").toLowerCase(),isA=f.type&&f.type.startsWith("audio/");
+    if(!isA&&!M[x]){$("#e").textContent="That file does not look like audio. Use mp3, m4a, wav, ogg, aac, flac or webm.";e.target.value="";return}$("#e").textContent="";show(isA?f:new Blob([f],{type:M[x]}))};
   $("#f-story").onsubmit=async ev=>{ev.preventDefault();const t=$("#t").value.trim();
     if(!t){$("#e").textContent="Add a title.";return}if(!blob){$("#e").textContent="Record or upload audio first.";return}if(blob.size>8*1024*1024){$("#e").textContent="This audio is "+(blob.size/1048576).toFixed(1)+" MB. The limit is 8 MB. Record a shorter story or export a smaller file.";return}
     try{const raw=await blob.arrayBuffer(),pr=$("#priv").checked,wl=$("#pubwall").checked&&!pr;let body=raw,ct=blob.type||"audio/webm";const tags=[["title",t],["topic",$("#ev").value],["lang",me.lang],["author",me.name],["t","gewel"]];

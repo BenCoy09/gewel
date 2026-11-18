@@ -103,6 +103,9 @@ const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x"
     assert.equal((await del(N.genKey())).status,403,"another key cannot delete");
     assert.equal((await del(sk)).status,200,"author can delete");
     assert.equal((await fetch(B+"/s/"+ev.id)).status,404,"story gone");
+    /* French dictionary must never map a text to itself or to another key, or the translator can loop forever */
+    const idxHtml=require("fs").readFileSync(__dirname+"/public/index.html","utf8"),FR=JSON.parse(idxHtml.match(/const FR=(\{.*?\});\n/s)[1]);
+    assert.deepEqual(Object.entries(FR).filter(([k,v])=>k===v||v in FR).map(e=>e[0]),[],"no French key maps to itself or to another key");
     /* durable storage in Neon (against a mock of its HTTP SQL endpoint) */
     const DBU="postgres://user:secretpw@localhost:3916/db",files=new Map();let failInsert=false;
     const neon=http.createServer(async(q,r)=>{let b="";for await(const d of q)b+=d;r.setHeader("content-type","application/json");

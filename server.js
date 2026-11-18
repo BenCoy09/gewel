@@ -40,7 +40,7 @@ function priv(ip){if(net.isIPv4(ip)){const[a,b]=ip.split(".").map(Number);return
 async function lget(u){const x=new URL(u);if(!LOCAL){if(x.protocol!=="https:")throw new Error("Wallet host must use https.");const{address}=await dns.lookup(x.hostname);if(priv(address))throw new Error("Wallet host is not allowed.")}
   const r=await fetch(u,{redirect:"error",signal:AbortSignal.timeout(6000)});if(!r.ok)throw new Error("Wallet host returned an error.");const t=await r.text();if(t.length>20000)throw new Error("Wallet reply is too large.");return JSON.parse(t)}
 /* AI transcript and translation through the Gemini API. The key lives only in the server environment. */
-const KEY=process.env.GEMINI_API_KEY||"",MODEL=process.env.GEMINI_MODEL||"gemini-3.8-flash",GBASE=process.env.GEMINI_BASE||"https://generativelanguage.googleapis.com",AIMAX=+(process.env.AI_DAILY_MAX||100);let aiDay="",aiN=0;
+const KEY=process.env.GEMINI_API_KEY||"",MODEL=process.env.GEMINI_MODEL||"gemini-3.8-flash",GBASE=process.env.GEMINI_BASE||"https://generativelanguage.googleapis.com",AIMAX=+(process.env.AI_DAILY_MAX||100),FALLBACKS=(process.env.GEMINI_FALLBACK??"gemini-3.6-flash,gemini-3.5-flash-lite").split(",").map(x=>x.trim()).filter(Boolean),RETRY_MS=+(process.env.AI_RETRY_MS||1500),BUSY=[429,500,502,503,504];let aiDay="",aiN=0;
 const aiFile=id=>path.join(DATA,"ai-"+id+".json"),aiOf=id=>{try{return JSON.parse(fs.readFileSync(aiFile(id)))}catch(e){return null}};
 const PROMPT='Transcribe this audio exactly as spoken, in the language spoken. Then translate it into English and into French. If you are unsure of a word, write [unclear]. Reply only with JSON: {"language":"...","transcript":"...","english":"...","french":"..."}';
 /* relays chosen by the storyteller, checked before the server connects to them */
@@ -119,12 +119,15 @@ const server=http.createServer(async(req,res)=>{
       if(!await NS.check(ev)||ev.kind!==27235||!fresh(ev)||tag(ev,"e")!==m[1]||tag(ev,"x")!==sha(buf)||ev.pubkey!==r.event.pubkey)return json(res,403,{error:"Only the storyteller can ask for this, with a fresh signature."});
       const day=new Date().toISOString().slice(0,10);if(aiDay!==day){aiDay=day;aiN=0}if(aiN>=AIMAX)return json(res,429,{error:"The daily AI limit has been reached. Try tomorrow."});aiN++;
       try{const b64=buf.toString("base64"),HD={"content-type":"application/json","x-goog-api-key":KEY},call=(u,b)=>fetch(GBASE+u,{method:"POST",headers:HD,signal:AbortSignal.timeout(90000),body:JSON.stringify(b)});
-        let g=await call("/v1beta/interactions",{model:MODEL,input:[{type:"text",text:PROMPT},{type:"audio",data:b64,mime_type:"audio/wav"}],response_format:SCHEMA}),mode="interactions";
-        if(!g.ok&&[400,404,405].includes(g.status)){const g2=await call(`/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`,{contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:"audio/wav",data:b64}}]}],generationConfig:{responseMimeType:"application/json"}});if(g2.ok){g=g2;mode="generateContent"}}
+        const attempt=async mdl=>{let g=await call("/v1beta/interactions",{model:mdl,input:[{type:"text",text:PROMPT},{type:"audio",data:b64,mime_type:"audio/wav"}],response_format:SCHEMA}),mode="interactions";
+          if(!g.ok&&[400,404,405].includes(g.status)){const g2=await call(`/v1beta/models/${encodeURIComponent(mdl)}:generateContent`,{contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:"audio/wav",data:b64}}]}],generationConfig:{responseMimeType:"application/json"}});if(g2.ok){g=g2;mode="generateContent"}}return{g,mode}};
+        /* busy servers (503 and similar) are retried, then the next model is tried; the model that answered is recorded */
+        const t0=Date.now();let g,mode,used;
+        outer:for(const mdl of[MODEL,...FALLBACKS.filter(x=>x!==MODEL)]){for(let k=0;k<2;k++){({g,mode}=await attempt(mdl));used=mdl;if(g.ok||!BUSY.includes(g.status))break outer;if(Date.now()-t0>45000)break outer;await new Promise(r=>setTimeout(r,RETRY_MS*(k+1)))}}
         if(!g.ok){const ej=await g.json().catch(()=>({}));throw new Error("Gemini returned status "+g.status+(ej.error&&ej.error.message?": "+String(ej.error.message).slice(0,200):""))}
         const j=await g.json(),txt=mode==="interactions"?interactionText(j):(j.candidates?.[0]?.content?.parts||[]).map(x=>x.text||"").join("");if(!txt)throw new Error("Gemini sent a reply in an unexpected shape (keys: "+Object.keys(j).slice(0,8).join(", ")+")");
         const o=JSON.parse(txt),c=v=>typeof v==="string"?v.slice(0,20000):"";
-        const out={language:c(o.language).slice(0,60),transcript:c(o.transcript),english:c(o.english),french:c(o.french),model:MODEL,created:new Date().toISOString()};
+        const out={language:c(o.language).slice(0,60),transcript:c(o.transcript),english:c(o.english),french:c(o.french),model:used,created:new Date().toISOString()};
         if(!out.transcript)throw new Error("Gemini returned no transcript.");await put(aiFile(m[1]),JSON.stringify(out));return json(res,200,out)}
       catch(e){return json(res,502,{error:e.message.startsWith("Gemini")?e.message:"Could not read Gemini’s answer."})}}
     if(req.method==="GET"&&p==="/api/ln")return json(res,200,{enabled:lnmap.has(u.searchParams.get("pk")||"")});

@@ -17,16 +17,16 @@ function miniRelay(port,wsk){const store=[],subs=[],M=(f,e)=>(!f.kinds||f.kinds.
       if(a[0]==="EVENT"){s.out(["OK",a[1].id,true,""]);put(a[1]);wallet(a[1])}}});sock.on("error",()=>{})}).listen(port);return srv}
 const relay=miniRelay(3913,WSK);let seen={};const otsSeen=[];
 const cal=http.createServer(async(q,r)=>{const ch=[];for await(const d of q)ch.push(d);otsSeen.push({url:q.url,body:Buffer.concat(ch),accept:q.headers.accept});r.end(crypto.randomBytes(40))}).listen(3915);
-let gemMode="interactions";const GJ=JSON.stringify({language:"Wolof",transcript:"Bés bu rafet la",english:"It was a beautiful day",french:"C’était une belle journée"});
+let gemMode="interactions",flaky=0;const GJ=JSON.stringify({language:"Wolof",transcript:"Bés bu rafet la",english:"It was a beautiful day",french:"C’était une belle journée"});
 const gem=http.createServer(async(q,r)=>{let b="";for await(const d of q)b+=d;seen={url:q.url,key:q.headers["x-goog-api-key"],body:JSON.parse(b)};r.setHeader("content-type","application/json");
-  if(q.url==="/v1beta/interactions"){if(gemMode==="fallback"){r.statusCode=404;return r.end(JSON.stringify({error:{message:"model not found"}}))}return r.end(JSON.stringify({outputs:[{type:"text",text:GJ}]}))}
+  if(q.url==="/v1beta/interactions"){if(gemMode==="flaky"&&++flaky===1||gemMode==="model-down"&&seen.body.model==="gemini-3.8-flash"){r.statusCode=503;return r.end(JSON.stringify({error:{message:"high demand"}}))}if(gemMode==="all-down"){r.statusCode=503;return r.end(JSON.stringify({error:{message:"high demand"}}))}if(gemMode==="fallback"){r.statusCode=404;return r.end(JSON.stringify({error:{message:"model not found"}}))}return r.end(JSON.stringify({outputs:[{type:"text",text:GJ}]}))}
   r.end(JSON.stringify({candidates:[{content:{parts:[{text:GJ}]}}]}))}).listen(3914);
 const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x");r.setHeader("content-type","application/json");
   if(u.pathname==="/.well-known/lnurlp/tester")return r.end(JSON.stringify({tag:"payRequest",callback:"http://localhost:3912/cb",minSendable:1000,maxSendable:5000000,metadata:"[]"}));
   if(u.pathname==="/cb"){const sats=+u.searchParams.get("amount")/1000;return r.end(JSON.stringify({pr:"lnbc"+(sats===777?1:sats/100)+"u1pqzqzqzqzqz"}))}
   r.statusCode=404;r.end("{}")}).listen(3912);
 (async()=>{
-  const s=spawn("node",["server.js"],{cwd:__dirname,env:{...process.env,PORT:3911,DATA_DIR:TMP,ALLOW_LOCAL_LNURL:"1",GEMINI_API_KEY:"testkey",OTS_CALENDARS:"http://localhost:3915",GEMINI_BASE:"http://localhost:3914",RELAYS:"ws://localhost:1,ws://localhost:3913"}});await new Promise(r=>setTimeout(r,700));
+  const s=spawn("node",["server.js"],{cwd:__dirname,env:{...process.env,PORT:3911,DATA_DIR:TMP,ALLOW_LOCAL_LNURL:"1",AI_RETRY_MS:"10",GEMINI_API_KEY:"testkey",OTS_CALENDARS:"http://localhost:3915",GEMINI_BASE:"http://localhost:3914",RELAYS:"ws://localhost:1,ws://localhost:3913"}});await new Promise(r=>setTimeout(r,700));
   try{
     /* crypto against published vectors */
     const sk3="0".repeat(63)+"3";assert.equal(N.pubkey(sk3),"f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9","BIP-340 public key vector");
@@ -75,6 +75,10 @@ const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x"
     const ar=await aiReq(sk,wev.id);assert.equal(ar.status,200,"AI transcript made");const aj=await ar.json();assert(aj.transcript&&aj.french&&aj.english,"AI result has transcript and translations");
     assert(seen.url==="/v1beta/interactions"&&seen.key==="testkey"&&seen.body.model==="gemini-3.8-flash"&&seen.body.input[1].type==="audio"&&seen.body.input[1].mime_type==="audio/wav"&&seen.body.response_format.type==="object","request uses the Interactions API with the key in a header and audio inline");
     gemMode="fallback";const fb=await aiReq(sk,cv.id);assert.equal(fb.status,200,"falls back to generateContent when the Interactions endpoint is not found");assert(seen.url.includes(":generateContent"),"fallback used the generateContent endpoint");gemMode="interactions";
+    const aiOk=async(mark,mode)=>{gemMode=mode;const ev2=await mk([[mark,"1"],["wall","1"]]);assert.equal((await post(ev2,audio)).status,201);const r=await aiReq(sk,ev2.id);gemMode="interactions";return r};
+    flaky=0;const rf=await aiOk("fl","flaky");assert.equal(rf.status,200,"a busy (503) answer is retried and then succeeds");
+    const rd=await aiOk("md","model-down");assert.equal(rd.status,200,"when the main model is busy a fallback model answers");assert.equal((await rd.json()).model,"gemini-3.6-flash","the model that answered is recorded");
+    const ra=await aiOk("ad","all-down");assert.equal(ra.status,502,"if every model is busy the error is reported");assert(/503/.test((await ra.json()).error),"the error says what Google returned");
     /* audio served with Range support (iPhone) and content-type parameters stripped */
     const full=await fetch(B+"/api/audio/"+wev.id);assert.equal(full.headers.get("accept-ranges"),"bytes","audio advertises byte ranges");
     const r1=await fetch(B+"/api/audio/"+wev.id,{headers:{range:"bytes=0-9"}});assert.equal(r1.status,206,"range request gets 206");assert.equal(r1.headers.get("content-range"),"bytes 0-9/"+audio.length,"content-range is correct");assert(Buffer.from(await r1.arrayBuffer()).equals(audio.subarray(0,10)),"range bytes are correct");

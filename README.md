@@ -45,6 +45,10 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 
 ![Tampered audio fails](docs/img/IMG_4397.jpeg)
 
+**A tip, paid and received (10 sats over Lightning):**
+
+![Wallet showing 10 sats received](docs/img/paid-tip.png)
+
 > The page also says *"Signed does not mean true."* A signature proves who said it and that it was not altered. It does not prove the story is accurate, and Gewel says so.
 
 ## How it works
@@ -88,7 +92,7 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 | A real Lightning invoice requested from a real Lightning address (500 sats) | ✅ Checked by hand |
 | Bitcoin timestamp request accepted by a real OpenTimestamps calendar (pending confirmation) | ✅ Checked by hand |
 | Crypto vectors, server checks, encryption, deletion, tips, storage, relays | ✅ Automated (`node test.js`, against mocks where noted) |
-| Invoice **paid** by a listener and sats received | ⬜ Not yet confirmed |
+| Invoice **paid** by a listener and sats received (10 sats) | ✅ Checked by hand |
 | Wipe the browser, restore with the recovery key | ✅ Checked by hand |
 | Stories survive a server restart (Neon database) | ✅ Checked by hand |
 | `.ots` proof checked with the `ots` tool | ✅ Checked by hand |
@@ -120,10 +124,9 @@ Optional settings (`PORT`, `DATA_DIR`, `RELAYS`, `DATABASE_URL`, `GEMINI_API_KEY
 
 ## Roadmap
 
-1. Confirm a paid tip end to end (invoice paid, sats received).
-2. Check Bitcoin confirmation of timestamps inside the app.
-3. Add Wolof.
-4. NIP-44 wallet encryption, Blossom media storage, offline recording queue.
+1. Check Bitcoin confirmation of timestamps inside the app.
+2. Add Wolof.
+3. NIP-44 wallet encryption, Blossom media storage, offline recording queue.
 
 ## Docs
 

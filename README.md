@@ -59,27 +59,7 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 
 **Also built:** private stories (encrypted in the browser, so the server holds only ciphertext), a public wall of moments that shaped money in Africa, a Nostr Wallet Connect panel, custom relays, Bitcoin timestamp requests (OpenTimestamps), signed deletion, and English/French.
 
-```mermaid
-flowchart LR
-  subgraph Device["Storyteller's device"]
-    R[Record / upload] --> H[SHA-256 fingerprint]
-    H --> S[Sign Nostr note, BIP-340]
-    K[(Key in IndexedDB)] --> S
-  end
-  S -->|audio + signed proof| API
-  subgraph Server["Gewel server (Node, zero dependencies)"]
-    API[POST /api/stories] --> V{Verify fingerprint + signature}
-    V -->|valid| F[(Storage)]
-    V -->|invalid| X[Refuse]
-    F --> P["/s/:id public verification page"]
-    F -->|publish note| RLY[(Nostr relays)]
-    F -->|request timestamp| OTS[(OpenTimestamps calendars)]
-    F --> TIP["/api/tip/:id"]
-  end
-  TIP -->|LNURL-pay| LW[(Storyteller's Lightning wallet)]
-  Listener -->|opens link| P
-  Listener -->|pays invoice| LW
-```
+![How Gewel works: device, server and outside services](docs/img/architecture.svg)
 
 ## Why Nostr, Lightning and Bitcoin
 

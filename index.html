@@ -65,7 +65,7 @@ footer{max-width:860px;margin:0 auto;padding:24px clamp(16px,5vw,32px);color:var
 <body>
 <header class="bar"><a class="brand" href="#home" aria-label="Gewel home"><span id="logo"></span>Gewel</a><nav id="nav" aria-label="Main"></nav></header>
 <main id="app"></main>
-<footer>Gewel is a hackathon build for the Dakar Bitcoin Hack. Stories are saved on this server and restored with your recovery key.</footer>
+<footer id="ft">Gewel is a hackathon build for the Dakar Bitcoin Hack. Stories are saved on this server and restored with your recovery key.<span id="bd" class="meta"></span></footer>
 <script src="/nostr.js"></script>
 <script>
 "use strict";
@@ -82,6 +82,7 @@ const kv={get:k=>tx("kv","readonly",s=>s.get(k)),set:(k,v)=>tx("kv","readwrite",
 const stories={all:()=>tx("stories","readonly",s=>s.getAll()),put:o=>tx("stories","readwrite",s=>s.put(o))};
 const wipe=async()=>{await tx("kv","readwrite",s=>s.clear());await tx("stories","readwrite",s=>s.clear());try{localStorage.clear()}catch(e){}};
 /* ---------- crypto: Nostr (BIP-340 Schnorr), see nostr.js ---------- */
+const BUILD="2026-11-19-r5";$("#bd").textContent=" Build "+BUILD;
 const sha=async buf=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",buf))].map(x=>x.toString(16).padStart(2,"0")).join("");
 const tg=(e,k)=>(e.tags.find(t=>t[0]===k)||[])[1]||"";
 async function verifyProof(e,buf){const out={sig:await Nostr.check(e),audio:null};if(buf){const h=await sha(buf);out.audio=h===tg(e,"x")||h===tg(e,"xp")};return out}
@@ -186,7 +187,7 @@ stories(){
     mr.start();$(".rec").classList.add("live");$("#rb").textContent="Stop recording";rs.textContent="Recording…"}
     catch(e){$("#e").textContent="Microphone is blocked or missing. Allow access in your browser, or upload an audio file instead."}};
   $("#up").onchange=e=>{const f=e.target.files[0];if(!f)return;const M={m4a:"audio/mp4",mp4:"audio/mp4",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",aac:"audio/aac",webm:"audio/webm",flac:"audio/flac",opus:"audio/ogg"},x=(f.name.split(".").pop()||"").toLowerCase(),isA=f.type&&f.type.startsWith("audio/");
-    if(!isA&&!M[x]){$("#e").textContent="That file does not look like audio. Use mp3, m4a, wav, ogg, aac, flac or webm.";e.target.value="";return}$("#e").textContent="";show(isA?f:new Blob([f],{type:M[x]}))};
+    if(!isA&&!M[x]){$("#e").textContent="That file does not look like audio. Use mp3, m4a, wav, ogg, aac, flac or webm.";e.target.value="";return}$("#e").textContent="";show(isA?f:new Blob([f],{type:M[x]}));$("#rs").textContent="Selected "+f.name+" ("+(f.size/1048576).toFixed(1)+" MB). Ready to sign."};
   $("#f-story").onsubmit=async ev=>{ev.preventDefault();const t=$("#t").value.trim();
     if(!t){$("#e").textContent="Add a title.";return}if(!blob){$("#e").textContent="Record or upload audio first.";return}if(blob.size>8*1024*1024){$("#e").textContent="This audio is "+(blob.size/1048576).toFixed(1)+" MB. The limit is 8 MB. Record a shorter story or export a smaller file.";return}
     try{const raw=await blob.arrayBuffer(),pr=$("#priv").checked,wl=$("#pubwall").checked&&!pr;let body=raw,ct=blob.type||"audio/webm";const tags=[["title",t],["topic",$("#ev").value],["lang",me.lang],["author",me.name],["t","gewel"]];

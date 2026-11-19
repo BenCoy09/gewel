@@ -79,6 +79,18 @@ const mock=require("http").createServer((q,r)=>{const u=new URL(q.url,"http://x"
     flaky=0;const rf=await aiOk("fl","flaky");assert.equal(rf.status,200,"a busy (503) answer is retried and then succeeds");
     const rd=await aiOk("md","model-down");assert.equal(rd.status,200,"when the main model is busy a fallback model answers");assert.equal((await rd.json()).model,"gemini-3.6-flash","the model that answered is recorded");
     const ra=await aiOk("ad","all-down");assert.equal(ra.status,502,"if every model is busy the error is reported");assert(/503/.test((await ra.json()).error),"the error says what Google returned");
+    const ownReq=async(id,x)=>fetch(B+"/api/ai/"+id,{method:"POST",headers:{"x-event":b64(JSON.stringify(await N.event(sk,27235,[["e",id],["x",x]],"gewel-ai")))}});
+    const wev3=await mk([["own","1"],["wall","1"]]);assert.equal((await post(wev3,audio)).status,201);
+    assert.equal((await ownReq(wev3.id,sha(audio))).status,200,"AI works on the stored audio without uploading it again");
+    assert(seen.body.input[1].mime_type==="audio/webm"&&Buffer.from(seen.body.input[1].data,"base64").equals(audio),"Gemini receives the stored audio with its own type");
+    assert.equal((await ownReq(wev3.id,"0".repeat(64))).status,403,"the signature must name this story's fingerprint");
+    const txtReq=async(id,text,x,k=sk)=>fetch(B+"/api/ai/"+id,{method:"POST",headers:{"content-type":"application/json","x-event":b64(JSON.stringify(await N.event(k,27235,[["e",id],["x",x??sha(Buffer.from(text,"utf8"))]],"gewel-ai")))},body:JSON.stringify({text})});
+    const tq=await txtReq(wev3.id,"Bés bu rafet la");assert.equal(tq.status,200,"typed text is translated");assert(/typed/.test((await tq.json()).source),"result says the source was typed text");
+    assert(seen.body.input.length===1&&seen.body.input[0].text.includes("Bés bu rafet la"),"only text, no audio, reaches Gemini");
+    assert.equal((await txtReq(wev3.id,"x","0".repeat(64))).status,403,"typed text must match the signed fingerprint");
+    assert.equal((await txtReq(wev3.id,"x".repeat(7000))).status,400,"overlong text is refused");
+    assert.equal((await txtReq(wev3.id,"hello",undefined,N.genKey())).status,403,"only the author can translate text for a story");
+    const ast=await (await fetch(B+"/api/ai-status")).json();assert(ast.configured&&ast.model==="gemini-3.8-flash"&&ast.lastOk,"AI status shows the configuration and the last success, never the key");assert(!JSON.stringify(ast).includes("testkey"),"AI status never contains the key");
     /* audio served with Range support (iPhone) and content-type parameters stripped */
     const full=await fetch(B+"/api/audio/"+wev.id);assert.equal(full.headers.get("accept-ranges"),"bytes","audio advertises byte ranges");
     const r1=await fetch(B+"/api/audio/"+wev.id,{headers:{range:"bytes=0-9"}});assert.equal(r1.status,206,"range request gets 206");assert.equal(r1.headers.get("content-range"),"bytes 0-9/"+audio.length,"content-range is correct");assert(Buffer.from(await r1.arrayBuffer()).equals(audio.subarray(0,10)),"range bytes are correct");

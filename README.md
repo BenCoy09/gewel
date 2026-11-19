@@ -49,6 +49,13 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 
 ![Wallet showing 10 sats received](docs/img/paid-tip.png)
 
+<!-- After you have seen the AI translation work on the live site, save a screenshot as docs/img/ai-translation.jpeg and remove this comment markers:
+
+**Optional AI transcript and translation (Gemini), labelled as machine-made and outside the signature:**
+
+![AI translation on a story page](docs/img/ai-translation.jpeg)
+-->
+
 > The page also says *"Signed does not mean true."* A signature proves who said it and that it was not altered. It does not prove the story is accurate, and Gewel says so.
 
 ## How it works
@@ -61,7 +68,7 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 6. **Get tipped.** Listeners request an invoice from your Lightning address and pay from any wallet.
 7. **Recover.** Clear the browser, paste the recovery key, and every story returns.
 
-**Also built:** private stories (encrypted in the browser, so the server holds only ciphertext), a public wall of moments that shaped money in Africa, a Nostr Wallet Connect panel, custom relays, Bitcoin timestamp requests (OpenTimestamps), signed deletion, and English/French.
+**Also built:** private stories (encrypted in the browser, so the server holds only ciphertext), a public wall of moments that shaped money in Africa, a Nostr Wallet Connect panel, custom relays, Bitcoin timestamp requests (OpenTimestamps), signed deletion, optional AI transcripts and translation (Gemini), and English/French.
 
 ![How Gewel works: device, server and outside services](docs/img/architecture.svg)
 
@@ -70,6 +77,19 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 - **Nostr** gives every story a standard, portable signature. Any Nostr tool can verify a Gewel story, and the storyteller owns the key.
 - **Lightning** lets a listener pay a storyteller directly, in small amounts, with no middleman. That matters where remittance fees run near 9%.
 - **Bitcoin timestamps** (OpenTimestamps) can anchor a story's note id to the Bitcoin chain, so its existence at a point in time can be checked later.
+
+## Optional AI: transcripts and translation
+
+Gewel uses AI only where it helps a listener understand a story: a story told in Wolof or Yoruba can be read in English and French.
+
+- On a public story, the storyteller can tap **Add AI transcript and translation**. The server sends the stored audio to Google's Gemini API and returns a transcript plus English and French translations.
+- If audio does not work, the storyteller can **type the transcript** and have AI translate the text instead.
+- Every result is labelled *made by a machine, may contain errors*, shows which model made it, and is **not covered by the storyteller's signature**. The signed story is the recording, never the AI text.
+- **Consent each time:** the app asks before anything is sent to Google. Private (encrypted) stories cannot use it.
+- Only the storyteller can request it (a fresh signature is required), requests are rate limited and capped per day, and the Gemini key lives only in the server environment.
+- It is optional: with no key set, the rest of Gewel works unchanged. `/api/ai-status` shows whether AI is configured and the last error, never the key.
+
+**Limits, stated plainly:** accuracy in Wolof and other African languages is not verified and may be poor; Gemini can be busy, so the server retries and falls back to other models; results depend on Google's service.
 
 ## Security by design
 
@@ -97,6 +117,7 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 | Stories survive a server restart (Neon database) | ✅ Checked by hand |
 | `.ots` proof checked with the `ots` tool | ✅ Checked by hand |
 | Nostr Wallet Connect with a real wallet | ✅ Checked by hand |
+| AI transcript or translation from a real Gemini key | ⏳ Built and tested against a mock. Change this to ✅ only after you have seen it work on the live site, and say which path worked (audio or typed text). |
 | French translation reviewed by a native speaker | ✅ Reviewed by a native speaker |
 
 Gewel cannot see whether a tip was paid, and says so in the app. Anything not built is labelled in the app.
@@ -135,4 +156,4 @@ Optional settings (`PORT`, `DATA_DIR`, `RELAYS`, `DATABASE_URL`, `GEMINI_API_KEY
 
 ## Stack
 
-Node (no dependencies) · vanilla JS client · Nostr (NIP-01, 09, 19, 47) · Lightning (LNURL-pay) · OpenTimestamps · Neon Postgres · Render
+Node (no dependencies) · vanilla JS client · Nostr (NIP-01, 09, 19, 47) · Lightning (LNURL-pay) · OpenTimestamps · Neon Postgres · Gemini API (optional) · Render

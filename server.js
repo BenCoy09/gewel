@@ -64,6 +64,8 @@ function serveAudio(req,res,buf,type){const h={"content-type":type,"accept-range
     if(a>b||a>=n){res.writeHead(416,{"content-range":"bytes */"+n});return res.end()}
     res.writeHead(206,{...h,"content-range":`bytes ${a}-${b}/${n}`,"content-length":b-a+1});return res.end(buf.subarray(a,b+1))}
   res.writeHead(200,{...h,"content-length":buf.length});res.end(buf)}
+const PROMPT_TEXT='Here is the transcript of a spoken story. Keep the transcript exactly as given. Detect its language and translate it into English and into French. Reply only with JSON: {"language":"...","transcript":"...","english":"...","french":"..."}';
+const aiLast={};
 const hits=new Map();const limited=ip=>{const n=Date.now(),a=(hits.get(ip)||[]).filter(t=>n-t<36e5);a.push(n);hits.set(ip,a);return a.length>40};
 const send=(res,c,body,type="application/json")=>{res.writeHead(c,{"content-type":type,"x-content-type-options":"nosniff","referrer-policy":"no-referrer",
   "content-security-policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src 'self' blob:"});res.end(body)};
@@ -80,7 +82,7 @@ h1{font:800 clamp(30px,6vw,46px)/1.05 Arial,sans-serif;margin:.4em 0}audio{width
 ${tag(e,"enc")?"<p class=\"m\">This story is private. Its audio is encrypted and only the storyteller can play it.</p>":audio?`<audio controls src="/api/audio/${e.id}"></audio>`:""}
 <p class="${sig?"ok":"bad"}">${sig?"The Nostr signature is valid for this story.":"The signature does not match this story."}</p>
 <p class="${audio?"ok":"bad"}">${audio?"The audio matches the signed fingerprint.":"The stored audio does not match the signed fingerprint."}</p>
-${ai?`<h2>AI transcript and translations</h2><p class="m">Made by a machine (${esc(ai.model)}), not by the storyteller. It may contain errors and is not covered by the signature.</p><p class="m">Language: ${esc(ai.language)}</p><p>${esc(ai.transcript)}</p><h3>English</h3><p>${esc(ai.english)}</p><h3>Français</h3><p>${esc(ai.french)}</p>`:""}
+${ai?`<h2>AI transcript and translations</h2><p class="m">Made by a machine (${esc(ai.model)}), not by the storyteller. It may contain errors and is not covered by the signature.</p><p class="m">Language: ${esc(ai.language)}${ai.source?`. Source: ${esc(ai.source)}`:""}</p><p>${esc(ai.transcript)}</p><h3>English</h3><p>${esc(ai.english)}</p><h3>Français</h3><p>${esc(ai.french)}</p>`:""}
 ${tips?`<h2>Send sats to ${esc(tag(e,"author"))}</h2><form id="tf"><label>Amount in sats <input id="a" type="number" min="1" value="500"></label> <button>Get invoice</button></form><div id="o" aria-live="polite"></div><script>document.getElementById("tf").onsubmit=async e=>{e.preventDefault();const o=document.getElementById("o");o.textContent="Asking the wallet…";try{const r=await fetch("/api/tip/${e.id}?sats="+document.getElementById("a").value);const j=await r.json();if(!r.ok)throw new Error(j.error);o.innerHTML='<p>Pay this invoice with any Lightning wallet. Gewel cannot see whether it was paid.</p><textarea readonly rows="4" style="width:100%">'+j.invoice+'</textarea><p><a href="lightning:'+j.invoice+'">Open in my wallet</a></p>'}catch(x){o.textContent="Could not get an invoice: "+x.message}}</script>`:""}
 <p class="m">Nostr author <code>${NS.enc("npub",e.pubkey)}</code><br>Note id <code>${e.id}</code><br>Fingerprint <code>${esc(tag(e,"x"))}</code><br>${otsLine} Signed does not mean true; this is the storyteller’s own account.</p></main></html>`}
 const server=http.createServer(async(req,res)=>{
@@ -111,25 +113,28 @@ const server=http.createServer(async(req,res)=>{
       if(!await NS.check(ev)||ev.kind!==5||!fresh(ev))return json(res,403,{error:"A fresh signed deletion is required."});if(!r)return json(res,404,{error:"Not found."});
       if(r.event.pubkey!==ev.pubkey)return json(res,403,{error:"Only the author can delete this story."});
       for(const f of[path.join(DATA,id+".json"),path.join(DATA,id+".bin"),aiFile(id),otsFile(id)])await drop(f);idx.delete(id);publish(ev);return json(res,200,{deleted:true})}
+    if(req.method==="GET"&&p==="/api/ai-status")return json(res,200,{configured:!!KEY,model:MODEL,fallbacks:FALLBACKS,usedToday:aiN,dailyMax:AIMAX,lastOk:aiLast.ok||null,lastModel:aiLast.model||null,lastError:aiLast.error||null,lastErrorAt:aiLast.at||null});
     if(req.method==="GET"&&(m=p.match(/^\/api\/ai\/([0-9a-f]{64})$/)))return json(res,200,aiOf(m[1])||{});
     if(req.method==="POST"&&(m=p.match(/^\/api\/ai\/([0-9a-f]{64})$/))){
       if(!KEY)return json(res,503,{error:"AI help is not set up on this server. Add GEMINI_API_KEY to the .env file and restart."});
       if(limited(ip))return json(res,429,{error:"Too many requests."});const r=idx.get(m[1]);if(!r||tag(r.event,"enc"))return json(res,404,{error:"AI help is only available for public stories."});
       const buf=await body(req,12*1024*1024);let ev;try{ev=JSON.parse(Buffer.from(req.headers["x-event"]||"","base64").toString())}catch(e){return json(res,400,{error:"Bad request."})}
-      if(!await NS.check(ev)||ev.kind!==27235||!fresh(ev)||tag(ev,"e")!==m[1]||tag(ev,"x")!==sha(buf)||ev.pubkey!==r.event.pubkey)return json(res,403,{error:"Only the storyteller can ask for this, with a fresh signature."});
+      const jsonMode=/json/.test(req.headers["content-type"]||"");let typed="";if(jsonMode){try{typed=String(JSON.parse(buf.toString()).text||"")}catch(e){return json(res,400,{error:"Bad request."})}if(!typed.trim()||typed.length>6000)return json(res,400,{error:"Type between 1 and 6000 characters."})}
+      if(!await NS.check(ev)||ev.kind!==27235||!fresh(ev)||tag(ev,"e")!==m[1]||tag(ev,"x")!==(jsonMode?sha(Buffer.from(typed,"utf8")):buf.length?sha(buf):tag(r.event,"x"))||ev.pubkey!==r.event.pubkey)return json(res,403,{error:"Only the storyteller can ask for this, with a fresh signature."});
       const day=new Date().toISOString().slice(0,10);if(aiDay!==day){aiDay=day;aiN=0}if(aiN>=AIMAX)return json(res,429,{error:"The daily AI limit has been reached. Try tomorrow."});aiN++;
-      try{const b64=buf.toString("base64"),HD={"content-type":"application/json","x-goog-api-key":KEY},call=(u,b)=>fetch(GBASE+u,{method:"POST",headers:HD,signal:AbortSignal.timeout(90000),body:JSON.stringify(b)});
-        const attempt=async mdl=>{let g=await call("/v1beta/interactions",{model:mdl,input:[{type:"text",text:PROMPT},{type:"audio",data:b64,mime_type:"audio/wav"}],response_format:SCHEMA}),mode="interactions";
-          if(!g.ok&&[400,404,405].includes(g.status)){const g2=await call(`/v1beta/models/${encodeURIComponent(mdl)}:generateContent`,{contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:"audio/wav",data:b64}}]}],generationConfig:{responseMimeType:"application/json"}});if(g2.ok){g=g2;mode="generateContent"}}return{g,mode}};
+      try{const own=!jsonMode&&!buf.length,au=jsonMode?Buffer.alloc(0):own?fs.readFileSync(path.join(DATA,m[1]+".bin")):buf,mt=own?(r.mime||"audio/mp4").split(";")[0].replace("audio/x-m4a","audio/mp4"):"audio/wav",b64=au.toString("base64"),HD={"content-type":"application/json","x-goog-api-key":KEY},call=(u,b)=>fetch(GBASE+u,{method:"POST",headers:HD,signal:AbortSignal.timeout(90000),body:JSON.stringify(b)});
+        const attempt=async mdl=>{const PT=jsonMode?PROMPT_TEXT+"\n\n"+typed:PROMPT,input=jsonMode?[{type:"text",text:PT}]:[{type:"text",text:PT},{type:"audio",data:b64,mime_type:mt}];
+          let g=await call("/v1beta/interactions",{model:mdl,input,response_format:SCHEMA}),mode="interactions";
+          if(!g.ok&&[400,404,405].includes(g.status)){const g2=await call(`/v1beta/models/${encodeURIComponent(mdl)}:generateContent`,{contents:[{parts:jsonMode?[{text:PT}]:[{text:PT},{inline_data:{mime_type:mt,data:b64}}]}],generationConfig:{responseMimeType:"application/json"}});if(g2.ok){g=g2;mode="generateContent"}}return{g,mode}};
         /* busy servers (503 and similar) are retried, then the next model is tried; the model that answered is recorded */
         const t0=Date.now();let g,mode,used;
         outer:for(const mdl of[MODEL,...FALLBACKS.filter(x=>x!==MODEL)]){for(let k=0;k<2;k++){({g,mode}=await attempt(mdl));used=mdl;if(g.ok||!BUSY.includes(g.status))break outer;if(Date.now()-t0>45000)break outer;await new Promise(r=>setTimeout(r,RETRY_MS*(k+1)))}}
         if(!g.ok){const ej=await g.json().catch(()=>({}));throw new Error("Gemini returned status "+g.status+(ej.error&&ej.error.message?": "+String(ej.error.message).slice(0,200):""))}
         const j=await g.json(),txt=mode==="interactions"?interactionText(j):(j.candidates?.[0]?.content?.parts||[]).map(x=>x.text||"").join("");if(!txt)throw new Error("Gemini sent a reply in an unexpected shape (keys: "+Object.keys(j).slice(0,8).join(", ")+")");
-        const o=JSON.parse(txt),c=v=>typeof v==="string"?v.slice(0,20000):"";
-        const out={language:c(o.language).slice(0,60),transcript:c(o.transcript),english:c(o.english),french:c(o.french),model:used,created:new Date().toISOString()};
-        if(!out.transcript)throw new Error("Gemini returned no transcript.");await put(aiFile(m[1]),JSON.stringify(out));return json(res,200,out)}
-      catch(e){return json(res,502,{error:e.message.startsWith("Gemini")?e.message:"Could not read Gemini’s answer."})}}
+        const jm=txt.match(/\{[\s\S]*\}/),o=JSON.parse(jm?jm[0]:txt),c=v=>typeof v==="string"?v.slice(0,20000):"";
+        const out={language:c(o.language).slice(0,60),transcript:c(o.transcript),english:c(o.english),french:c(o.french),model:used,source:jsonMode?"text typed by the storyteller":"audio",created:new Date().toISOString()};
+        if(!out.transcript)throw new Error("Gemini returned no transcript.");await put(aiFile(m[1]),JSON.stringify(out));aiLast.ok=new Date().toISOString();aiLast.model=used;aiLast.error=null;return json(res,200,out)}
+      catch(e){aiLast.error=e.message.slice(0,300);aiLast.at=new Date().toISOString();return json(res,502,{error:e.message.startsWith("Gemini")?e.message:"Could not read Gemini’s answer ("+e.message.slice(0,100)+")."})}}
     if(req.method==="GET"&&p==="/api/ln")return json(res,200,{enabled:lnmap.has(u.searchParams.get("pk")||"")});
     if(req.method==="POST"&&p==="/api/ln"){if(limited(ip))return json(res,429,{error:"Too many requests."});let ev;try{ev=JSON.parse(await body(req,2048))}catch(e){return json(res,400,{error:"Bad request."})}
       if(!await NS.check(ev)||ev.kind!==30078||tag(ev,"d")!=="gewel-lightning")return json(res,403,{error:"Signature is not valid."});if(!fresh(ev))return json(res,400,{error:"Request expired. Try again."});

@@ -108,14 +108,14 @@ flowchart LR
 | A real Lightning invoice requested from a real Lightning address (500 sats) | ✅ Checked by hand |
 | Bitcoin timestamp request accepted by a real OpenTimestamps calendar (pending confirmation) | ✅ Checked by hand |
 | Crypto vectors, server checks, encryption, deletion, tips, storage, relays | ✅ Automated (`node test.js`, against mocks where noted) |
-| Invoice **paid** by a listener and sats received | ✅ Checked by hand |
+| Invoice **paid** by a listener and sats received | ⬜ Not yet confirmed |
 | Wipe the browser, restore with the recovery key | ✅ Checked by hand |
 | Stories survive a server restart (Neon database) | ✅ Checked by hand |
 | `.ots` proof checked with the `ots` tool | ✅ Checked by hand |
 | Nostr Wallet Connect with a real wallet | ✅ Checked by hand |
 | French translation reviewed by a native speaker | ✅ Reviewed by a native speaker |
 
-Gewel cannot see whether a tip was paid, and says so in the app. The paid-tip check was confirmed on the wallet side. Anything not built is labelled in the app.
+Gewel cannot see whether a tip was paid, and says so in the app. Anything not built is labelled in the app.
 
 ## How this maps to the judging criteria
 
@@ -140,9 +140,10 @@ Optional settings (`PORT`, `DATA_DIR`, `RELAYS`, `DATABASE_URL`, `GEMINI_API_KEY
 
 ## Roadmap
 
-1. Check Bitcoin confirmation of timestamps inside the app.
-2. Add Wolof.
-3. NIP-44 wallet encryption, Blossom media storage, offline recording queue.
+1. Confirm a paid tip end to end (invoice paid, sats received).
+2. Check Bitcoin confirmation of timestamps inside the app.
+3. Add Wolof.
+4. NIP-44 wallet encryption, Blossom media storage, offline recording queue.
 
 ## Docs
 

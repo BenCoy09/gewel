@@ -6,7 +6,7 @@ A modern *gewel* (griot): record a story in your own language, sign it with a ke
 **Live demo:** https://gewel.onrender.com (free server, first visit after sleep takes about a minute)
 **Built for:** Dakar Bitcoin Hack 2026 · **Demo video:** _add link_
 
-![Gewel home](docs/img/home.png)
+![Gewel home](docs/img/IMG_4392.jpeg)
 
 ## Why
 
@@ -24,7 +24,7 @@ Gewel gives elders, traders, tontine keepers and student collectors a way to put
 
 Also built: private (browser-encrypted) stories, a public wall, a Nostr Wallet Connect panel, custom relays, OpenTimestamps requests, French.
 
-![Verify page](docs/img/verify.png)
+![Gewel home](docs/img/IMG_4396.jpeg)
 
 ## Try it in 60 seconds
 

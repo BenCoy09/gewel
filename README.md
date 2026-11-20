@@ -49,12 +49,9 @@ Gewel turns a voice recording into a **signed, verifiable, recoverable, tip-able
 
 ![Wallet showing 10 sats received](docs/img/paid-tip.png)
 
-<!-- After you have seen the AI translation work on the live site, save a screenshot as docs/img/ai-translation.jpeg and remove this comment markers:
+**AI transcript and translation (Gemini, optional), labelled as machine-made and outside the signature:**
 
-**Optional AI transcript and translation (Gemini), labelled as machine-made and outside the signature:**
-
-![AI translation on a story page](docs/img/ai-translation.jpeg)
--->
+![AI transcript with English and French translations on a story page](docs/img/ai-translation.jpeg)
 
 > The page also says *"Signed does not mean true."* A signature proves who said it and that it was not altered. It does not prove the story is accurate, and Gewel says so.
 
@@ -117,7 +114,7 @@ Gewel uses AI only where it helps a listener understand a story: a story told in
 | Stories survive a server restart (Neon database) | ✅ Checked by hand |
 | `.ots` proof checked with the `ots` tool | ✅ Checked by hand |
 | Nostr Wallet Connect with a real wallet | ✅ Checked by hand |
-| AI transcript or translation from a real Gemini key | ⏳ Built and tested against a mock. Change this to ✅ only after you have seen it work on the live site, and say which path worked (audio or typed text). |
+| AI transcript and English/French translation from a real Gemini key, using the story's stored audio | ✅ Checked by hand (the typed-text path is tested against a mock only) |
 | French translation reviewed by a native speaker | ✅ Reviewed by a native speaker |
 
 Gewel cannot see whether a tip was paid, and says so in the app. Anything not built is labelled in the app.

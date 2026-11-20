@@ -102,7 +102,7 @@ sequenceDiagram
 | Impersonation | The private key is created in the browser and never sent to the server. Only the public key travels. | Built |
 | Unauthorised deletion | Deleting needs a fresh signed Nostr deletion (NIP-09) from the author's key. | Built, tested |
 | Private stories | Audio is sealed with AES-256-GCM using a key derived (HKDF) from the author's Nostr key. The server and relays only ever see ciphertext. The signed note, with title, topic and author name, stays public. | Built, tested |
-| AI key and cost | The Gemini key exists only in the server environment (`.env`, git-ignored) and is sent in a header, never to the browser or logs. Requests need the author's fresh signature, are rate limited per address, and are capped per day. | Built, tested with a mock |
+| AI key and cost | The Gemini key exists only in the server environment (`.env`, git-ignored) and is sent in a header, never to the browser or logs. Requests need the author's fresh signature, are rate limited per address, and are capped per day. | Built, tested with a mock, and checked by hand once with a real key |
 | Sending audio to a third party | The author must confirm each time. Private stories are excluded. | Built |
 | Relays you choose | Addresses must be `wss://`, at most five, and must not resolve to private network addresses, so the server cannot be pointed at internal services. | Built, tested (private-address blocking not covered by a test) |
 | Timestamp claims | The app only says "pending". It never claims Bitcoin confirmation, because it does not check one. | Built |
@@ -126,8 +126,9 @@ sequenceDiagram
 |---|---|
 | `POST /api/stories` | Save a story. Body is the audio. Header `x-event` holds the base64 signed Nostr event (kind 1). Returns `201` or an error. |
 | `GET /api/stories?pk=<64 hex>` | List every event signed by a public key, newest first. |
-| `POST /api/ai/:id` | Make an AI transcript and translations for a public story. Body is WAV audio; header `x-event` is a fresh signed event (kind 27235) from the author. Needs `GEMINI_API_KEY`. |
-| `GET /api/ai/:id` | The stored AI result, if any. |
+| `POST /api/ai/:id` | Ask for a transcript and English and French translations of a public story. Header `x-event` is a fresh signed Nostr event (kind 27235) from the story's author with tags `e` (story id) and `x`. Three body modes: **empty** (the server uses the stored audio, `x` is the story's audio fingerprint), **WAV audio** (fallback, `x` is its SHA-256), or **JSON `{"text": "..."}`** with `content-type: application/json` (text only, up to 6000 characters, `x` is the SHA-256 of the text). Needs `GEMINI_API_KEY`. |
+| `GET /api/ai/:id` | The stored AI result for a story, or `{}`. |
+| `GET /api/ai-status` | Whether AI is configured, the model and fallbacks, usage today, the last success and the last error. Never contains the key. |
 | `GET /api/ots/:id` | Timestamp request status for a story: `pending`, `failed` or none. |
 | `GET /ots/:id.txt` and `GET /ots/:id.txt.ots` | The exact event text (its SHA-256 is the note id) and the `.ots` proof file to check with the OpenTimestamps tool. |
 | `GET /api/wall` | Public stories whose authors opted in. Private stories never appear. |
@@ -164,9 +165,15 @@ node server.js    # http://localhost:3000, data in ./data
 2. In the project folder: `cp .env.example .env`, put the key in `.env`, restart the server. `.env` is git-ignored. Never paste the key into code, the browser or a chat.
 3. On your Stories page, a public story gets an **Add AI transcript and translation** button. It asks for confirmation, because the audio goes to Google through this server.
 
-How it works: the browser converts the audio to 16 kHz mono WAV and sends it with a fresh signature from the author. The server checks the signature, then asks Gemini for a JSON answer through the Interactions API, which Google's audio docs now use, and falls back to `generateContent` if that endpoint answers 400, 404 or 405. The result is stored and shown on the story page, labelled as machine-made and outside the signature. Private stories cannot use it. `AI_DAILY_MAX` caps daily use.
+How it works: by default the server uses the audio it already stores for the story, so the browser does not upload anything again. The author's fresh signature is required. The server then asks Gemini for a JSON answer through the Interactions API, and falls back to `generateContent` if that endpoint answers 400, 404 or 405. If audio does not work, the author can type the transcript and have only the text translated. The result is stored as `ai-<story id>.json` (and mirrored to Neon when `DATABASE_URL` is set) and shown on the public story page, labelled as machine-made and outside the signature, with the model that answered. Private stories are refused (`404`), and deleting a story deletes its AI result.
 
-If Gemini answers that it is busy (HTTP 429 or 5xx), the server retries once, then tries the models in `GEMINI_FALLBACK` (default `gemini-3.6-flash,gemini-3.5-flash-lite`, both on Google's model list; their audio support is not verified), and records which model answered. The default model is `gemini-3.8-flash`, the one in Google's audio docs as of their September 2026 update. Model names change often, so if you see "Gemini returned status 404", set `GEMINI_MODEL` to a current model name from Google AI Studio. Tested only against a mock Gemini server; I have not run it against Google's real API.
+If Gemini is busy (HTTP 429 or 5xx) the server retries once, then tries the models in `GEMINI_FALLBACK` (default `gemini-3.6-flash,gemini-3.5-flash-lite`), and records which model answered. The default model is `gemini-3.8-flash`. Model names change often, so if you see "Gemini returned status 404", set `GEMINI_MODEL` to a current model name from Google AI Studio.
+
+Settings: `GEMINI_API_KEY` (server only), `GEMINI_MODEL`, `GEMINI_FALLBACK`, `AI_DAILY_MAX` (default 100 requests a day for the whole server), `AI_RETRY_MS`.
+
+Security: the key is never sent to the browser or logged. Requests need the author's fresh signature, are rate limited and capped per day, and the browser asks for consent before anything is sent to Google. Error messages come from Google's reply and never include the key.
+
+Tests: against a mock Gemini server (request shape and key header, fallback to `generateContent`, busy answers retried, model fallback, stored-audio mode, typed-text mode, author-only access, fingerprint binding, length limit, private stories refused, and the status endpoint never containing the key). Also checked by hand once on the live site with a real Gemini key, using the stored-audio path: transcript plus English and French shown. The typed-text and WAV paths are tested against the mock only.
 
 ## Keep stories safe with Neon (free Postgres)
 
@@ -208,17 +215,16 @@ gewel/
 - Cryptography against published vectors: BIP-340 Schnorr and the NIP-19 `nsec` encoding.
 - Encryption: shared secret symmetry, NIP-04 round trip, sealed audio opens only with its own key and rejects tampering.
 - Server: story checks (valid, duplicate, edited, altered audio, wrong kind, incomplete private story), history by public key, public verification page, private pages with no player, the public wall (opt-in only), signed deletion, Lightning address handling, tip invoices against a mock wallet.
-- AI help against a mock Gemini server: the request shape, key in a header, author-only signature, private stories refused, result labelled on the public page.
+- AI help against a mock Gemini server: request shape and key header, fallback to `generateContent`, busy answers retried, model fallback, stored-audio and typed-text modes, author-only access, fingerprint binding, length limit, private stories refused, result labelled on the public page, and the status endpoint never containing the key.
 - Relays the storyteller chooses (refused when not `wss://` or more than five; only the chosen relay used) and timestamp requests against a mock calendar: the note id goes out as a 32-byte digest, the `.txt` file hashes to the note id, the `.ots` file carries the header and digest, and the page says pending.
 - Durable storage against a mock Neon SQL-over-HTTP endpoint: a story is mirrored to the database, a failed write is reported and not kept, a fresh server with an empty disk restores it (audio identical, signature still valid), and a deletion removes the database copy.
 - Relay publishing and wallet connection **against a mock relay that speaks the real Nostr relay protocol over WebSocket**, including a relay that cannot be reached.
 
 **Never run against the real thing (test these on your machine):**
 - Real public Nostr relays and a real Nostr Wallet Connect wallet. The wallet panel uses NIP-04 encryption only; a wallet that supports only NIP-44 will fail with an error. The app shows what the wallet or relay actually answered.
-- A real Lightning tip paid from a real wallet.
 - The whole browser interface: recording, restore from nsec, private playback, wall, wallet, delete. None of the browser code has been run in a browser by me.
 
-**Built, needs your key:** AI transcripts and translation. Tested only against a mock Gemini server. A real key, the real model name and real Wolof results are unverified, and Wolof accuracy in particular is unknown.
+**Checked by hand with a real key:** AI transcripts and translation, using the stored-audio path on an English story (transcript plus English and French shown). Not verified: the typed-text and WAV paths against Google, and Wolof or other African-language accuracy, which is unknown.
 
 **Built but unverified against the real thing:**
 - **Bitcoin timestamps.** Requests go to the public OpenTimestamps calendars, but I never reached them. The `.ots` file layout follows my understanding of the format and has not been checked with the real `ots` tool. Run `ots upgrade` and `ots verify` on a downloaded proof, and treat a failure as a bug to report.
